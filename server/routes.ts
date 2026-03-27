@@ -29,7 +29,7 @@ export async function registerRoutes(
       storage.createChatMessage({ role: "user", content: message, topic: topic || null });
 
       const model = genAI.getGenerativeModel({
-        model: "gemini-2.0-flash",
+        model: "gemini-3.1-flash-lite-preview",
         systemInstruction: TUTOR_SYSTEM,
       });
 
@@ -68,7 +68,7 @@ export async function registerRoutes(
       }
 
       const model = genAI.getGenerativeModel({
-        model: "gemini-2.0-flash",
+        model: "gemini-3.1-flash-lite-preview",
         systemInstruction: `Sei un esperto DevOps che crea quiz tecnici. Rispondi SOLO con un array JSON valido, senza testo aggiuntivo. Nessun markdown, nessun backtick, solo JSON puro.`,
       });
 
@@ -114,7 +114,7 @@ Rispondi con questo formato JSON esatto (array di 5 oggetti):
         type === "jenkinsfile" ? "Jenkinsfile" : "codice";
 
       const model = genAI.getGenerativeModel({
-        model: "gemini-2.0-flash",
+        model: "gemini-3.1-flash-lite-preview",
         systemInstruction: `Sei un senior DevOps engineer che fa code review. Rispondi SOLO con un oggetto JSON valido, senza testo aggiuntivo, senza markdown, senza backtick.`,
       });
 
