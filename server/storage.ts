@@ -13,6 +13,24 @@ import { desc } from "drizzle-orm";
 const sqlite = new Database("data.db");
 sqlite.pragma("journal_mode = WAL");
 
+// Crea le tabelle se non esistono (necessario al primo avvio su Render)
+sqlite.exec(`
+  CREATE TABLE IF NOT EXISTS chat_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    role TEXT NOT NULL,
+    content TEXT NOT NULL,
+    topic TEXT,
+    created_at INTEGER
+  );
+  CREATE TABLE IF NOT EXISTS quiz_results (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    topic TEXT NOT NULL,
+    score INTEGER NOT NULL,
+    total INTEGER NOT NULL,
+    created_at INTEGER
+  );
+`);
+
 export const db = drizzle(sqlite);
 
 export interface IStorage {
