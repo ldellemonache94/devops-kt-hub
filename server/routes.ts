@@ -1,10 +1,10 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import { insertChatMessageSchema, insertQuizResultSchema } from "@shared/schema";
 
-const anthropic = new Anthropic();
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
 
 const TUTOR_SYSTEM = `Sei un senior DevOps engineer di Accenture specializzato in Kubernetes, CI/CD, Docker, Helm e Git. 
 Rispondi in italiano con terminologia tecnica in inglese (kubectl, docker, git, etc). 
@@ -28,25 +28,26 @@ export async function registerRoutes(
       // Save user message
       storage.createChatMessage({ role: "user", content: message, topic: topic || null });
 
-      const messages: Array<{ role: "user" | "assistant"; content: string }> = [];
-      if (history && Array.isArray(history)) {
-        for (const h of history.slice(-10)) {
-          messages.push({ role: h.role, content: h.content });
-        }
-      }
-      messages.push({ role: "user", content: topic ? `[Argomento: ${topic}] ${message}` : message });
-
-      const response = await anthropic.messages.create({
-        model: "gemini_3_flash",
-        max_tokens: 2048,
-        system: TUTOR_SYSTEM,
-        messages,
+      const model = genAI.getGenerativeModel({
+        model: "gemini-1.5-flash",
+        systemInstruction: TUTOR_SYSTEM,
       });
 
-      const assistantContent = response.content
-        .filter((b: any) => b.type === "text")
-        .map((b: any) => b.text)
-        .join("");
+      // Build chat history
+      const chatHistory: Array<{ role: "user" | "model"; parts: Array<{ text: string }> }> = [];
+      if (history && Array.isArray(history)) {
+        for (const h of history.slice(-10)) {
+          chatHistory.push({
+            role: h.role === "assistant" ? "model" : "user",
+            parts: [{ text: h.content }],
+          });
+        }
+      }
+
+      const chat = model.startChat({ history: chatHistory });
+      const userMessage = topic ? `[Argomento: ${topic}] ${message}` : message;
+      const result = await chat.sendMessage(userMessage);
+      const assistantContent = result.response.text();
 
       // Save assistant message
       storage.createChatMessage({ role: "assistant", content: assistantContent, topic: topic || null });
@@ -66,35 +67,25 @@ export async function registerRoutes(
         return res.status(400).json({ error: "topic is required" });
       }
 
-      const response = await anthropic.messages.create({
-        model: "gemini_3_flash",
-        max_tokens: 2048,
-        system: `Sei un esperto DevOps che crea quiz tecnici. Rispondi SOLO con un array JSON valido, senza testo aggiuntivo. Nessun markdown, nessun backtick, solo JSON puro.`,
-        messages: [
-          {
-            role: "user",
-            content: `Genera 5 domande quiz a risposta multipla sull'argomento "${topic}" per DevOps engineers.
+      const model = genAI.getGenerativeModel({
+        model: "gemini-1.5-flash",
+        systemInstruction: `Sei un esperto DevOps che crea quiz tecnici. Rispondi SOLO con un array JSON valido, senza testo aggiuntivo. Nessun markdown, nessun backtick, solo JSON puro.`,
+      });
+
+      const prompt = `Genera 5 domande quiz a risposta multipla sull'argomento "${topic}" per DevOps engineers.
 Ogni domanda deve avere 4 opzioni (A, B, C, D), la risposta corretta e una breve spiegazione in italiano.
 I termini tecnici (comandi, nomi di tool, etc.) devono rimanere in inglese.
 
 Rispondi con questo formato JSON esatto (array di 5 oggetti):
-[{"question":"...","options":["A) ...","B) ...","C) ...","D) ..."],"correct":"A","explanation":"..."}]`
-          }
-        ],
-      });
+[{"question":"...","options":["A) ...","B) ...","C) ...","D) ..."],"correct":"A","explanation":"..."}]`;
 
-      const text = response.content
-        .filter((b: any) => b.type === "text")
-        .map((b: any) => b.text)
-        .join("");
+      const result = await model.generateContent(prompt);
+      const text = result.response.text();
 
-      // Try to extract JSON from response
       let questions;
       try {
-        // Try direct parse first
         questions = JSON.parse(text);
       } catch {
-        // Try to find JSON array in text
         const match = text.match(/\[[\s\S]*\]/);
         if (match) {
           questions = JSON.parse(match[0]);
@@ -122,14 +113,12 @@ Rispondi con questo formato JSON esatto (array di 5 oggetti):
         type === "dockerfile" ? "Dockerfile" :
         type === "jenkinsfile" ? "Jenkinsfile" : "codice";
 
-      const response = await anthropic.messages.create({
-        model: "gemini_3_flash",
-        max_tokens: 2048,
-        system: `Sei un senior DevOps engineer che fa code review. Rispondi SOLO con un oggetto JSON valido, senza testo aggiuntivo, senza markdown, senza backtick.`,
-        messages: [
-          {
-            role: "user",
-            content: `Analizza questo ${typeLabel} e fornisci una review strutturata.
+      const model = genAI.getGenerativeModel({
+        model: "gemini-1.5-flash",
+        systemInstruction: `Sei un senior DevOps engineer che fa code review. Rispondi SOLO con un oggetto JSON valido, senza testo aggiuntivo, senza markdown, senza backtick.`,
+      });
+
+      const prompt = `Analizza questo ${typeLabel} e fornisci una review strutturata.
 
 \`\`\`
 ${code}
@@ -141,15 +130,10 @@ Rispondi con questo formato JSON esatto:
   "summary": "breve riepilogo in italiano",
   "issues": [{"severity": "ok" | "warning" | "error", "message": "descrizione in italiano"}],
   "suggestions": ["suggerimento 1 in italiano", "suggerimento 2"]
-}`
-          }
-        ],
-      });
+}`;
 
-      const text = response.content
-        .filter((b: any) => b.type === "text")
-        .map((b: any) => b.text)
-        .join("");
+      const result = await model.generateContent(prompt);
+      const text = result.response.text();
 
       let review;
       try {
